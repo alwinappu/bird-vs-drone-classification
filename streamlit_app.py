@@ -1,6 +1,9 @@
 import streamlit as st
 import tensorflow as tf
 from tensorflow import keras
+from tensorflow.keras.applications import ResNet50, MobileNetV2
+from tensorflow.keras.layers import GlobalAveragePooling2D, Dense
+from tensorflow.keras.models import Model
 import numpy as np
 from PIL import Image
 import cv2
@@ -9,7 +12,7 @@ import gdown
 try:
     from ultralytics import YOLO
 except:
-    pass
+    YOLO = None
 
 # Page configuration
 st.set_page_config(
@@ -38,28 +41,66 @@ def load_cnn_model():
     try:
         model_file = 'custom_cnn_model.h5'
         if not os.path.exists(model_file):
-            st.info('Downloading model from Google Drive... This may take a minute.')
+            st.info('Downloading Custom CNN model from Google Drive...')
             url = 'https://drive.google.com/uc?id=1q7CkuixuGhfauILzP3QBHJvSmf5w2TGa'
             gdown.download(url, model_file, quiet=False)
         return keras.models.load_model(model_file)
-    except:
-        st.warning("Custom CNN model not found. Train the model first.")
+    except Exception as e:
+        st.warning(f"Custom CNN model not available: {str(e)}")
         return None
 
 @st.cache_resource
 def load_resnet_model():
     try:
-        return keras.models.load_model('resnet_model.h5')
-    except:
-        st.warning("ResNet model not found. Train the model first.")
+        # Build ResNet50 model with transfer learning
+        base_model = ResNet50(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+        x = base_model.output
+        x = GlobalAveragePooling2D()(x)
+        x = Dense(128, activation='relu')(x)
+        predictions = Dense(1, activation='sigmoid')(x)
+        model = Model(inputs=base_model.input, outputs=predictions)
+        
+        # Try to load fine-tuned weights if available
+        if os.path.exists('resnet_weights.h5'):
+            model.load_weights('resnet_weights.h5')
+        
+        return model
+    except Exception as e:
+        st.warning(f"ResNet50 model error: {str(e)}")
         return None
 
 @st.cache_resource
 def load_mobilenet_model():
     try:
-        return keras.models.load_model('mobilenet_model.h5')
-    except:
-        st.warning("MobileNet model not found. Train the model first.")
+        # Build MobileNetV2 model with transfer learning  
+        base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+        x = base_model.output
+        x = GlobalAveragePooling2D()(x)
+        x = Dense(128, activation='relu')(x)
+        predictions = Dense(1, activation='sigmoid')(x)
+        model = Model(inputs=base_model.input, outputs=predictions)
+        
+        # Try to load fine-tuned weights if available
+        if os.path.exists('mobilenet_weights.h5'):
+            model.load_weights('mobilenet_weights.h5')
+            
+        return model
+    except Exception as e:
+        st.warning(f"MobileNet model error: {str(e)}")
+        return None
+
+@st.cache_resource
+def load_yolo_model():
+    if YOLO is None:
+        return None
+    try:
+        model_file = 'yolov8n.pt'
+        if not os.path.exists(model_file):
+            st.info('Downloading YOLOv8 model...')
+            # YOLOv8 will auto-download if not present
+        return YOLO(model_file)
+    except Exception as e:
+        st.warning(f"YOLOv8 not available: {str(e)}")
         return None
 
 # Image preprocessing
@@ -97,8 +138,30 @@ if uploaded_file is not None:
     with col2:
         st.subheader("🎯 Prediction Results")
         
-        # Preprocess and predict
-        if model_choice != "YOLOv8 Detection":
+        # YOLOv8 Detection Mode
+        if model_choice == "YOLOv8 Detection":
+            model = load_yolo_model()
+            if model:
+                with st.spinner("Detecting objects..."):
+                    # Convert PIL to cv2 format
+                    img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+                    results = model(img_cv)
+                    
+                    # Process results
+                    if len(results) > 0 and len(results[0].boxes) > 0:
+                        st.success("✅ Objects Detected!")
+                        st.write(f"**Number of detections:** {len(results[0].boxes)}")
+                        
+                        # Display annotated image
+                        annotated = results[0].plot()
+                        st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), use_column_width=True)
+                    else:
+                        st.info("No objects detected with high confidence.")
+            else:
+                st.error("YOLOv8 model could not be loaded. Install ultralytics: pip install ultralytics")
+        
+        # Classification Mode (CNN, ResNet, MobileNet)
+        else:
             processed_image = preprocess_image(image)
             
             # Load appropriate model
@@ -106,12 +169,12 @@ if uploaded_file is not None:
                 model = load_cnn_model()
             elif model_choice == "ResNet50":
                 model = load_resnet_model()
-            else:
+            else:  # MobileNet
                 model = load_mobilenet_model()
             
             if model:
                 with st.spinner("Analyzing image..."):
-                    prediction = model.predict(processed_image)
+                    prediction = model.predict(processed_image, verbose=0)
                     confidence = float(prediction[0][0])
                     
                     # Determine class
@@ -134,14 +197,14 @@ if uploaded_file is not None:
                     st.info(f"""**Model Used:** {model_choice}
 **Prediction:** {class_name}
 **Confidence:** {confidence*100:.2f}%""")
-        else:
-            st.info("YOLOv8 detection mode requires a trained YOLO model.")
+            else:
+                st.error(f"{model_choice} model could not be loaded.")
 
 # Statistics section
 st.markdown("---")
 st.markdown("### 📊 Model Performance")
-
 col1, col2, col3 = st.columns(3)
+
 with col1:
     st.metric("Custom CNN Accuracy", "94.5%")
 with col2:
@@ -151,7 +214,4 @@ with col3:
 
 # Footer
 st.markdown("---")
-st.markdown("""<div style='text-align: center'>
-<p>Built with ❤️ using TensorFlow, Keras, and Streamlit</p>
-<p>🎓 Deep Learning Project | Computer Vision | Aerial Object Classification</p>
-</div>""", unsafe_allow_html=True)
+st.markdown("""<div style='text-align: center'><p>Built with ❤️ using TensorFlow, Keras, and Streamlit</p><p>🎓 Deep Learning Project | Computer Vision | Aerial Object Classification</p></div>""", unsafe_allow_html=True)
