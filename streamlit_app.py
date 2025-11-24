@@ -14,6 +14,22 @@ try:
 except:
     YOLO = None
 
+# Disable TensorFlow warnings and optimize for deployment
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
+import tensorflow as tf
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+
+# Configure TensorFlow for deployment
+physical_devices = tf.config.list_physical_devices('CPU')
+if physical_devices:
+    tf.config.set_logical_device_configuration(
+        physical_devices[0],
+        [tf.config.LogicalDeviceConfiguration(memory_limit=1024)]
+    )
+
 # Page configuration
 st.set_page_config(
     page_title="Bird vs Drone Classifier",
