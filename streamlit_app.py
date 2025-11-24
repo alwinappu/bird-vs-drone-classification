@@ -9,7 +9,6 @@ from tensorflow.keras.applications import ResNet50, MobileNetV2
 from tensorflow.keras.layers import GlobalAveragePooling2D, Dense
 from tensorflow.keras.models import Model
 from PIL import Image
-import cv2
 import gdown
 
 # Try YOLO import (optional detection part)
@@ -21,10 +20,10 @@ except Exception:
 # ---------------- Paths & constants ---------------- #
 
 BASE_DIR = Path(".")
-CNN_MODEL_PATH = BASE_DIR / "custom_cnn_model.h5"   # Custom CNN
+CNN_MODEL_PATH = BASE_DIR / "custom_cnn_model.h5"   # Custom CNN weights
 RESNET_WEIGHTS = BASE_DIR / "resnet_weights.h5"     # Optional fine-tuned weights
 MOBILENET_WEIGHTS = BASE_DIR / "mobilenet_weights.h5"
-YOLO_WEIGHTS = BASE_DIR / "yolov8n.pt"              # YOLOv8n weights
+YOLO_WEIGHTS = BASE_DIR / "yolov8n.pt"              # YOLOv8n weights (auto-download)
 
 # Google Drive ID for custom_cnn_model.h5
 CNN_DRIVE_ID = "1q7CkuixuGhfauILzP3QBHJvSmf5w2TGa"
@@ -48,9 +47,9 @@ This app demonstrates:
 
 - ✅ Custom CNN classification model  
 - ✅ Transfer Learning (ResNet50, MobileNetV2)  
-- ✅ (Optional) YOLOv8 object detection  
+- ✅ YOLOv8 object detection  
 
-Upload an image and choose your model on the left.
+Upload an image and choose your mode on the left.
 ---
 """
 )
@@ -79,8 +78,8 @@ st.sidebar.info(
 
 - Custom CNN classification
 - Transfer learning (ResNet50, MobileNetV2)
-- Optional YOLOv8 object detection
-- Streamlit deployment
+- YOLOv8 object detection
+- Streamlit-based web deployment
 
 Use case: Aerial surveillance, wildlife monitoring, security & defense.
 """
@@ -95,7 +94,6 @@ def load_cnn_model():
         if not CNN_MODEL_PATH.exists():
             st.info("Downloading Custom CNN model from Google Drive...")
             url = f"https://drive.google.com/uc?export=download&id={CNN_DRIVE_ID}"
-            # gdown handles large file confirmation automatically
             gdown.download(url, str(CNN_MODEL_PATH), quiet=False)
 
         return keras.models.load_model(str(CNN_MODEL_PATH))
@@ -255,21 +253,23 @@ if uploaded_file is not None:
                 )
             else:
                 with st.spinner("Running YOLOv8 detection..."):
-                    img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-                    results = yolo_model(img_cv)
+                    # YOLOv8 accepts numpy RGB images directly
+                    img_np = np.array(image)  # RGB
+                    results = yolo_model(img_np)
 
                 if len(results) > 0 and len(results[0].boxes) > 0:
                     st.success(f"✅ Objects Detected: {len(results[0].boxes)}")
-                    annotated = results[0].plot()
+                    annotated_bgr = results[0].plot()      # returns BGR array
+                    annotated_rgb = annotated_bgr[:, :, ::-1]  # BGR -> RGB using numpy
                     st.image(
-                        cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
+                        annotated_rgb,
                         width=500,
                         caption="YOLOv8 Detection Output",
                     )
                 else:
                     st.info("No objects detected with high confidence.")
 
-# ---------------- Static performance section (from your training experiments) ---------------- #
+# ---------------- Static performance section ---------------- #
 
 st.markdown("---")
 st.markdown("### 📊 Model Performance Summary (from training experiments)")
