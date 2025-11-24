@@ -15,7 +15,7 @@ import gdown
 try:
     from ultralytics import YOLO
 except Exception:
-    YOLO = None
+    YOLO = None  # Will be None on Streamlit Cloud (ultralytics too heavy)
 
 # ---------------- Paths & constants ---------------- #
 
@@ -58,10 +58,22 @@ Upload an image and choose your mode on the left.
 
 st.sidebar.header("⚙️ Mode & Model")
 
-mode = st.sidebar.radio(
-    "Select Task",
-    ["Classification", "Object Detection (YOLOv8)"],
-)
+# If YOLO failed to import (e.g., Streamlit Cloud), only show classification
+if YOLO is None:
+    mode = st.sidebar.radio(
+        "Select Task",
+        ["Classification"],
+    )
+    st.sidebar.warning(
+        "YOLOv8 detection is available in the **local version** of this project.\n\n"
+        "The Streamlit Cloud environment cannot install the heavy 'ultralytics' "
+        "library (PyTorch + CUDA)."
+    )
+else:
+    mode = st.sidebar.radio(
+        "Select Task",
+        ["Classification", "Object Detection (YOLOv8)"],
+    )
 
 if mode == "Classification":
     model_choice = st.sidebar.selectbox(
@@ -151,15 +163,35 @@ def build_mobilenet_model():
 
 
 @st.cache_resource
-def load_yolo_model():
-    """Load YOLOv8 model (optional detection component)."""
+def load_yolov8_model():
+    """
+    Load YOLOv8 model.
+
+    - On Streamlit Cloud: ultralytics usually cannot be installed (too heavy),
+      so YOLO is None and we show a clear message.
+    - On local machine (where ultralytics is installed): YOLO will work.
+    """
     if YOLO is None:
+        st.error(
+            "YOLOv8 model could not be loaded.\n\n"
+            "The current environment does not have the 'ultralytics' package "
+            "installed (or it failed to install). This is expected on Streamlit Cloud "
+            "because YOLOv8 depends on large GPU libraries.\n\n"
+            "✅ To use YOLOv8 object detection, run this project locally on your "
+            "own computer and install:\n\n"
+            "`pip install ultralytics`\n"
+        )
         return None
+
     try:
-        # If file not present, YOLO will auto-download yolov8n.pt
         return YOLO(str(YOLO_WEIGHTS))
     except Exception as e:
-        st.warning(f"YOLOv8 not available: {e}")
+        st.error(
+            "YOLOv8 model could not be loaded.\n\n"
+            "This usually happens in restricted environments. "
+            "To run YOLOv8, execute this project locally with 'ultralytics' installed.\n\n"
+            f"Technical details: {e}"
+        )
         return None
 
 
@@ -256,13 +288,8 @@ if uploaded_file is not None:
 
         # ---------- YOLOv8 Detection mode ---------- #
         else:
-            yolo_model = load_yolo_model()
-            if yolo_model is None:
-                st.error(
-                    "YOLOv8 model could not be loaded.\n\n"
-                    "Make sure 'ultralytics' is in requirements.txt and the app has restarted."
-                )
-            else:
+            yolo_model = load_yolov8_model()
+            if yolo_model is not None:
                 with st.spinner("Running YOLOv8 detection..."):
                     # YOLOv8 accepts numpy RGB images directly
                     img_np = np.array(image)  # RGB
