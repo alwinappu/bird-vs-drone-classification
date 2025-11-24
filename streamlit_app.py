@@ -14,14 +14,6 @@ try:
 except:
     YOLO = None
 
-# Disable TensorFlow warnings and optimize for deployment
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-
-import tensorflow as tf
-tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-
-# Configure TensorFlow for deployment
 
 # Page configuration
 st.set_page_config(
