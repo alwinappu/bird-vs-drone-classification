@@ -3,6 +3,6 @@ tensorflow
 keras
 numpy
 Pillow
-opencv-python-headless
 gdown
 ultralytics
+opencv-python-headless
