@@ -9,11 +9,11 @@ from PIL import Image
 import cv2
 import os
 import gdown
+
 try:
     from ultralytics import YOLO
 except:
     YOLO = None
-
 
 # Page configuration
 st.set_page_config(
@@ -134,7 +134,7 @@ if uploaded_file is not None:
     with col1:
         st.subheader("📷 Input Image")
         image = Image.open(uploaded_file)
-        st.image(image, width="stretch")
+        st.image(image, use_container_width=True)
     
     with col2:
         st.subheader("🎯 Prediction Results")
@@ -155,7 +155,7 @@ if uploaded_file is not None:
                         
                         # Display annotated image
                         annotated = results[0].plot()
-                        st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), width="stretch")
+                        st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), use_container_width=True)
                     else:
                         st.info("No objects detected with high confidence.")
             else:
@@ -214,5 +214,12 @@ with col3:
     st.metric("MobileNet Accuracy", "95.8%")
 
 # Footer
-st.markdown("---")
-st.markdown("""<div style='text-align: center'><p>Built with ❤️ using TensorFlow, Keras, and Streamlit</p><p>🎓 Deep Learning Project | Computer Vision | Aerial Object Classification</p></div>""", unsafe_allow_html=True)
+st.markdown(
+    """
+    <div style='text-align: center'>
+        <p>Built with ❤️ using TensorFlow, Keras, and Streamlit</p>
+        <p>🎓 Deep Learning Project | Computer Vision | Aerial Object Classification</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
