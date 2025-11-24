@@ -133,7 +133,7 @@ if uploaded_file is not None:
     with col1:
         st.subheader("📷 Input Image")
         image = Image.open(uploaded_file)
-        st.image(image, use_column_width=True)
+        st.image(image, width="stretch")
     
     with col2:
         st.subheader("🎯 Prediction Results")
@@ -154,7 +154,7 @@ if uploaded_file is not None:
                         
                         # Display annotated image
                         annotated = results[0].plot()
-                        st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), use_column_width=True)
+                        st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), width="stretch")
                     else:
                         st.info("No objects detected with high confidence.")
             else:
