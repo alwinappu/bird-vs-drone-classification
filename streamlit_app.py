@@ -174,21 +174,32 @@ def preprocess_image(image: Image.Image, target_size=(224, 224)):
 
 
 def classify_image(model, image: Image.Image, model_name: str):
-    """Run classification and return predicted label and confidence."""
+    """Run classification and return predicted label and confidence.
+
+    We assume the model output is P(Drone). We then compute:
+      - P(Drone) = p_drone
+      - P(Bird)  = 1 - p_drone
+
+    To reduce false Drone predictions on birds, we use a slightly
+    higher threshold for Drone (0.7). Below that, we call it Bird.
+    """
     processed_image = preprocess_image(image, target_size=IMG_SIZE)
 
     with st.spinner(f"Analyzing image with {model_name}..."):
         prediction = model.predict(processed_image, verbose=0)
-        confidence = float(prediction[0][0])
+        p_drone = float(prediction[0][0])
+        p_bird = 1.0 - p_drone
 
-    # Treat output as P(Bird); threshold at 0.5
-    if confidence > 0.5:
-        class_name = "Bird"
-        class_emoji = "🦅"
-    else:
+    DRONE_THRESHOLD = 0.7  # tune if needed
+
+    if p_drone >= DRONE_THRESHOLD:
         class_name = "Drone"
         class_emoji = "🚁"
-        confidence = 1 - confidence
+        confidence = p_drone
+    else:
+        class_name = "Bird"
+        class_emoji = "🦅"
+        confidence = p_bird
 
     return class_name, class_emoji, confidence
 
@@ -259,8 +270,8 @@ if uploaded_file is not None:
 
                 if len(results) > 0 and len(results[0].boxes) > 0:
                     st.success(f"✅ Objects Detected: {len(results[0].boxes)}")
-                    annotated_bgr = results[0].plot()      # returns BGR array
-                    annotated_rgb = annotated_bgr[:, :, ::-1]  # BGR -> RGB using numpy
+                    annotated_bgr = results[0].plot()         # BGR array
+                    annotated_rgb = annotated_bgr[:, :, ::-1]  # BGR -> RGB
                     st.image(
                         annotated_rgb,
                         width=500,
