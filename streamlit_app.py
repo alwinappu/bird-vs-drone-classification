@@ -53,18 +53,16 @@ def load_cnn_model():
 @st.cache_resource
 def load_resnet_model():
     try:
-        # Build ResNet50 model with transfer learning
         base_model = ResNet50(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
         x = base_model.output
         x = GlobalAveragePooling2D()(x)
         x = Dense(128, activation='relu')(x)
         predictions = Dense(1, activation='sigmoid')(x)
         model = Model(inputs=base_model.input, outputs=predictions)
-        
-        # Try to load fine-tuned weights if available
+
         if os.path.exists('resnet_weights.h5'):
             model.load_weights('resnet_weights.h5')
-        
+
         return model
     except Exception as e:
         st.warning(f"ResNet50 model error: {str(e)}")
@@ -73,18 +71,16 @@ def load_resnet_model():
 @st.cache_resource
 def load_mobilenet_model():
     try:
-        # Build MobileNetV2 model with transfer learning  
         base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
         x = base_model.output
         x = GlobalAveragePooling2D()(x)
         x = Dense(128, activation='relu')(x)
         predictions = Dense(1, activation='sigmoid')(x)
         model = Model(inputs=base_model.input, outputs=predictions)
-        
-        # Try to load fine-tuned weights if available
+
         if os.path.exists('mobilenet_weights.h5'):
             model.load_weights('mobilenet_weights.h5')
-            
+
         return model
     except Exception as e:
         st.warning(f"MobileNet model error: {str(e)}")
@@ -96,9 +92,6 @@ def load_yolo_model():
         return None
     try:
         model_file = 'yolov8n.pt'
-        if not os.path.exists(model_file):
-            st.info('Downloading YOLOv8 model...')
-            # YOLOv8 will auto-download if not present
         return YOLO(model_file)
     except Exception as e:
         st.warning(f"YOLOv8 not available: {str(e)}")
@@ -111,7 +104,7 @@ def preprocess_image(image, target_size=(224, 224)):
     img_array = np.expand_dims(img_array, axis=0)
     return img_array
 
-# Main app
+# Sidebar info
 st.sidebar.markdown("---")
 st.sidebar.markdown("### About")
 st.sidebar.info("""This AI system can:
@@ -128,57 +121,48 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-    # Display image
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.subheader("📷 Input Image")
         image = Image.open(uploaded_file)
-        st.image(image, use_container_width=True)
-    
+        st.image(image, width=700)
+
     with col2:
         st.subheader("🎯 Prediction Results")
-        
-        # YOLOv8 Detection Mode
+
+        # YOLO mode
         if model_choice == "YOLOv8 Detection":
             model = load_yolo_model()
             if model:
                 with st.spinner("Detecting objects..."):
-                    # Convert PIL to cv2 format
                     img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
                     results = model(img_cv)
-                    
-                    # Process results
+
                     if len(results) > 0 and len(results[0].boxes) > 0:
                         st.success("✅ Objects Detected!")
-                        st.write(f"**Number of detections:** {len(results[0].boxes)}")
-                        
-                        # Display annotated image
                         annotated = results[0].plot()
-                        st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), use_container_width=True)
+                        st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), width=700)
                     else:
-                        st.info("No objects detected with high confidence.")
+                        st.info("No objects detected.")
             else:
-                st.error("YOLOv8 model could not be loaded. Install ultralytics: pip install ultralytics")
-        
-        # Classification Mode (CNN, ResNet, MobileNet)
+                st.error("YOLOv8 model could not be loaded.")
+
         else:
             processed_image = preprocess_image(image)
-            
-            # Load appropriate model
+
             if model_choice == "Custom CNN":
                 model = load_cnn_model()
             elif model_choice == "ResNet50":
                 model = load_resnet_model()
-            else:  # MobileNet
+            else:
                 model = load_mobilenet_model()
-            
+
             if model:
                 with st.spinner("Analyzing image..."):
                     prediction = model.predict(processed_image, verbose=0)
                     confidence = float(prediction[0][0])
-                    
-                    # Determine class
+
                     if confidence > 0.5:
                         class_name = "Drone"
                         class_emoji = "🚁"
@@ -186,32 +170,25 @@ if uploaded_file is not None:
                         class_name = "Bird"
                         class_emoji = "🦅"
                         confidence = 1 - confidence
-                    
-                    # Display results
+
                     st.success(f"## {class_emoji} {class_name}")
                     st.metric("Confidence Score", f"{confidence*100:.2f}%")
-                    
-                    # Progress bar
                     st.progress(confidence)
-                    
-                    # Additional info
+
                     st.info(f"""**Model Used:** {model_choice}
 **Prediction:** {class_name}
 **Confidence:** {confidence*100:.2f}%""")
             else:
                 st.error(f"{model_choice} model could not be loaded.")
 
-# Statistics section
+# Stats section
 st.markdown("---")
 st.markdown("### 📊 Model Performance")
-col1, col2, col3 = st.columns(3)
 
-with col1:
-    st.metric("Custom CNN Accuracy", "94.5%")
-with col2:
-    st.metric("ResNet50 Accuracy", "97.2%")
-with col3:
-    st.metric("MobileNet Accuracy", "95.8%")
+col1, col2, col3 = st.columns(3)
+col1.metric("Custom CNN Accuracy", "94.5%")
+col2.metric("ResNet50 Accuracy", "97.2%")
+col3.metric("MobileNet Accuracy", "95.8%")
 
 # Footer
 st.markdown(
