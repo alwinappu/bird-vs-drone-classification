@@ -208,7 +208,7 @@ def run_yolo_onnx(
     session: ort.InferenceSession,
     image: Image.Image,
     img_size: int = 640,
-    conf_thres: float = 0.25,
+    conf_thres: float = 0.10,   # LOWERED THRESHOLD
 ):
     """
     Run YOLOv8 ONNX inference on a PIL image.
@@ -244,6 +244,7 @@ def run_yolo_onnx(
     class_conf = np.max(class_scores, axis=1)
     scores = objectness * class_conf
 
+    # Filter by confidence
     keep = scores > conf_thres
     boxes_xywh = boxes_xywh[keep]
     scores = scores[keep]
@@ -341,7 +342,7 @@ if uploaded_file is not None:
             session = load_yolov8_onnx()
             if session is not None:
                 with st.spinner("Running YOLOv8 (ONNX) detection..."):
-                    annotated_img, num_det = run_yolo_onnx(session, image)
+                    annotated_img, num_det = run_yolov8_onnx = run_yolo_onnx(session, image)
 
                 if num_det > 0:
                     st.success(f"✅ Objects detected: {num_det}")
