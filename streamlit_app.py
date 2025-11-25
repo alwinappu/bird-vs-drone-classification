@@ -8,32 +8,27 @@ from tensorflow import keras
 from tensorflow.keras.applications import ResNet50, MobileNetV2
 from tensorflow.keras.layers import GlobalAveragePooling2D, Dense
 from tensorflow.keras.models import Model
-from PIL import Image
+from PIL import Image, ImageDraw
 import gdown
-
-# Try YOLO import (optional detection part)
-try:
-    from ultralytics import YOLO
-except Exception:
-    YOLO = None  # Will be None on Streamlit Cloud (ultralytics too heavy)
+import onnxruntime as ort
 
 # ---------------- Paths & constants ---------------- #
 
 BASE_DIR = Path(".")
-CNN_MODEL_PATH = BASE_DIR / "custom_cnn_model.h5"   # Custom CNN weights
-RESNET_WEIGHTS = BASE_DIR / "resnet_weights.h5"     # Optional fine-tuned weights
-MOBILENET_WEIGHTS = BASE_DIR / "mobilenet_weights.h5"
-YOLO_WEIGHTS = BASE_DIR / "yolov8n.pt"              # YOLOv8n weights (auto-download)
+CNN_MODEL_PATH = BASE_DIR / "custom_cnn_model.h5"     # Custom CNN weights
+RESNET_WEIGHTS = BASE_DIR / "resnet_weights.h5"       # Optional fine-tuned weights
+MOBILENET_WEIGHTS = BASE_DIR / "mobilenet_weights.h5" # Optional fine-tuned weights
+YOLO_ONNX_PATH = BASE_DIR / "yolov8n.onnx"            # YOLOv8 ONNX model
 
 # Google Drive ID for custom_cnn_model.h5
 CNN_DRIVE_ID = "1q7CkuixuGhfauILzP3QBHJvSmf5w2TGa"
 
-IMG_SIZE = (224, 224)
+IMG_SIZE = (224, 224)  # for classification models
 
 # ---------------- Streamlit page config ---------------- #
 
 st.set_page_config(
-    page_title="Bird vs Drone Classifier & Detector",
+    page_title="Aerial Object Classification & Detection",
     page_icon="🦅",
     layout="wide",
 )
@@ -47,7 +42,7 @@ This app demonstrates:
 
 - ✅ Custom CNN classification model  
 - ✅ Transfer Learning (ResNet50, MobileNetV2)  
-- ✅ YOLOv8 object detection  
+- ✅ YOLOv8 object detection (ONNX, CPU)
 
 Upload an image and choose your mode on the left.
 ---
@@ -58,22 +53,10 @@ Upload an image and choose your mode on the left.
 
 st.sidebar.header("⚙️ Mode & Model")
 
-# If YOLO failed to import (e.g., Streamlit Cloud), only show classification
-if YOLO is None:
-    mode = st.sidebar.radio(
-        "Select Task",
-        ["Classification"],
-    )
-    st.sidebar.warning(
-        "YOLOv8 detection is available in the **local version** of this project.\n\n"
-        "The Streamlit Cloud environment cannot install the heavy 'ultralytics' "
-        "library (PyTorch + CUDA)."
-    )
-else:
-    mode = st.sidebar.radio(
-        "Select Task",
-        ["Classification", "Object Detection (YOLOv8)"],
-    )
+mode = st.sidebar.radio(
+    "Select Task",
+    ["Classification", "Object Detection (YOLOv8)"],
+)
 
 if mode == "Classification":
     model_choice = st.sidebar.selectbox(
@@ -90,7 +73,7 @@ st.sidebar.info(
 
 - Custom CNN classification
 - Transfer learning (ResNet50, MobileNetV2)
-- YOLOv8 object detection
+- YOLOv8 object detection via ONNX (CPU)
 - Streamlit-based web deployment
 
 Use case: Aerial surveillance, wildlife monitoring, security & defense.
@@ -163,35 +146,20 @@ def build_mobilenet_model():
 
 
 @st.cache_resource
-def load_yolov8_model():
-    """
-    Load YOLOv8 model.
-
-    - On Streamlit Cloud: ultralytics usually cannot be installed (too heavy),
-      so YOLO is None and we show a clear message.
-    - On local machine (where ultralytics is installed): YOLO will work.
-    """
-    if YOLO is None:
-        st.error(
-            "YOLOv8 model could not be loaded.\n\n"
-            "The current environment does not have the 'ultralytics' package "
-            "installed (or it failed to install). This is expected on Streamlit Cloud "
-            "because YOLOv8 depends on large GPU libraries.\n\n"
-            "✅ To use YOLOv8 object detection, run this project locally on your "
-            "own computer and install:\n\n"
-            "`pip install ultralytics`\n"
-        )
+def load_yolov8_onnx():
+    """Load YOLOv8 ONNX model using onnxruntime (CPU)."""
+    if not YOLO_ONNX_PATH.exists():
+        st.error("YOLOv8 ONNX model 'yolov8n.onnx' not found in app directory.")
         return None
 
     try:
-        return YOLO(str(YOLO_WEIGHTS))
-    except Exception as e:
-        st.error(
-            "YOLOv8 model could not be loaded.\n\n"
-            "This usually happens in restricted environments. "
-            "To run YOLOv8, execute this project locally with 'ultralytics' installed.\n\n"
-            f"Technical details: {e}"
+        session = ort.InferenceSession(
+            str(YOLO_ONNX_PATH),
+            providers=["CPUExecutionProvider"],
         )
+        return session
+    except Exception as e:
+        st.error(f"Failed to load YOLOv8 ONNX model: {e}")
         return None
 
 
@@ -200,7 +168,7 @@ def load_yolov8_model():
 def preprocess_image(image: Image.Image, target_size=(224, 224)):
     """Resize and normalize image for classification models."""
     image = image.resize(target_size)
-    img_array = np.array(image) / 255.0
+    img_array = np.array(image).astype(np.float32) / 255.0
     img_array = np.expand_dims(img_array, axis=0)
     return img_array
 
@@ -234,6 +202,88 @@ def classify_image(model, image: Image.Image, model_name: str):
         confidence = p_bird
 
     return class_name, class_emoji, confidence
+
+
+def run_yolo_onnx(
+    session: ort.InferenceSession,
+    image: Image.Image,
+    img_size: int = 640,
+    conf_thres: float = 0.25,
+):
+    """
+    Run YOLOv8 ONNX inference on a PIL image.
+    Returns (annotated_image, num_detections).
+    This is a simplified pipeline: resize -> run -> basic filtering.
+    """
+
+    orig_w, orig_h = image.size
+
+    # 1) Preprocess: resize to square, normalize, NCHW
+    img_resized = image.resize((img_size, img_size))
+    img_np = np.array(img_resized).astype(np.float32) / 255.0  # (H,W,3) RGB
+    img_np = np.transpose(img_np, (2, 0, 1))  # (3,H,W)
+    img_np = np.expand_dims(img_np, axis=0)   # (1,3,H,W)
+
+    input_name = session.get_inputs()[0].name
+    outputs = session.run(None, {input_name: img_np})
+    preds = outputs[0]  # Usually (1,84,8400) or (1,8400,84)
+
+    # 2) Ensure shape is (num_anchors, num_attrs)
+    if preds.ndim == 3:
+        # If shape is (1,84,8400) -> transpose to (1,8400,84)
+        if preds.shape[1] < preds.shape[2]:
+            preds = np.transpose(preds, (0, 2, 1))
+    preds = preds[0]  # (num_anchors, num_attrs)
+
+    # YOLOv8 format: [x, y, w, h, obj, cls1, cls2, ...]
+    boxes_xywh = preds[:, 0:4]
+    objectness = preds[:, 4]
+    class_scores = preds[:, 5:]
+
+    class_ids = np.argmax(class_scores, axis=1)
+    class_conf = np.max(class_scores, axis=1)
+    scores = objectness * class_conf
+
+    keep = scores > conf_thres
+    boxes_xywh = boxes_xywh[keep]
+    scores = scores[keep]
+    class_ids = class_ids[keep]
+
+    annotated = image.copy()
+    draw = ImageDraw.Draw(annotated)
+
+    num_det = 0
+
+    for (cx, cy, w, h), score, cls in zip(boxes_xywh, scores, class_ids):
+        # cx,cy,w,h are in pixels relative to img_size
+        x1 = (cx - w / 2) * (orig_w / img_size)
+        y1 = (cy - h / 2) * (orig_h / img_size)
+        x2 = (cx + w / 2) * (orig_w / img_size)
+        y2 = (cy + h / 2) * (orig_h / img_size)
+
+        x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+
+        # Clip to image bounds
+        x1 = max(0, min(orig_w - 1, x1))
+        y1 = max(0, min(orig_h - 1, y1))
+        x2 = max(0, min(orig_w - 1, x2))
+        y2 = max(0, min(orig_h - 1, y2))
+
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        # Draw rectangle (red)
+        draw.rectangle([x1, y1, x2, y2], outline=(255, 0, 0), width=2)
+
+        # Simple label (class id + score)
+        label = f"ID {int(cls)} ({score:.2f})"
+        text_bg_w = draw.textlength(label) + 6
+        draw.rectangle([x1, y1 - 16, x1 + text_bg_w, y1], fill=(255, 0, 0))
+        draw.text((x1 + 3, y1 - 14), label, fill=(255, 255, 255))
+
+        num_det += 1
+
+    return annotated, num_det
 
 
 # ---------------- File uploader ---------------- #
@@ -288,24 +338,20 @@ if uploaded_file is not None:
 
         # ---------- YOLOv8 Detection mode ---------- #
         else:
-            yolo_model = load_yolov8_model()
-            if yolo_model is not None:
-                with st.spinner("Running YOLOv8 detection..."):
-                    # YOLOv8 accepts numpy RGB images directly
-                    img_np = np.array(image)  # RGB
-                    results = yolo_model(img_np)
+            session = load_yolov8_onnx()
+            if session is not None:
+                with st.spinner("Running YOLOv8 (ONNX) detection..."):
+                    annotated_img, num_det = run_yolo_onnx(session, image)
 
-                if len(results) > 0 and len(results[0].boxes) > 0:
-                    st.success(f"✅ Objects Detected: {len(results[0].boxes)}")
-                    annotated_bgr = results[0].plot()         # BGR array
-                    annotated_rgb = annotated_bgr[:, :, ::-1]  # BGR -> RGB
+                if num_det > 0:
+                    st.success(f"✅ Objects detected: {num_det}")
                     st.image(
-                        annotated_rgb,
+                        annotated_img,
                         width=500,
-                        caption="YOLOv8 Detection Output",
+                        caption="YOLOv8 (ONNX) Detection Output",
                     )
                 else:
-                    st.info("No objects detected with high confidence.")
+                    st.info("No objects detected above confidence threshold.")
 
 # ---------------- Static performance section ---------------- #
 
@@ -329,7 +375,7 @@ st.markdown(
 st.markdown(
     """
     <div style='text-align: center'>
-        <p>Built with ❤️ using TensorFlow/Keras, YOLOv8 and Streamlit</p>
+        <p>Built with ❤️ using TensorFlow/Keras, YOLOv8 (ONNX) and Streamlit</p>
         <p>🎓 Aerial Object Classification & Detection | Bird vs Drone Project</p>
     </div>
     """,
