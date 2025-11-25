@@ -1,0 +1,22 @@
+# Requirements for LOCAL development with full YOLOv8 support
+# Use this file when running the app on your local machine
+
+# Core dependencies (same as cloud)
+streamlit
+tensorflow
+keras
+numpy
+Pillow
+gdown
+
+# YOLOv8 dependencies (only for local, too heavy for Streamlit Cloud)
+ultralytics
+torch
+torchvision
+opencv-python
+
+# Additional useful packages for local development
+matplotlib
+scipy
+scikit-learn
+pandas
