@@ -4,4 +4,4 @@ keras
 numpy
 Pillow
 gdown
-ultralytics
+onnxruntime
