@@ -177,6 +177,7 @@ def classify_image(model, image: Image.Image, model_name: str):
     """Run classification and return predicted label and confidence.
 
     We assume the model output is P(Drone). We then compute:
+
       - P(Drone) = p_drone
       - P(Bird)  = 1 - p_drone
 
@@ -208,12 +209,15 @@ def run_yolo_onnx(
     session: ort.InferenceSession,
     image: Image.Image,
     img_size: int = 640,
-    conf_thres: float = 0.10,   # LOWERED THRESHOLD
+    conf_thres: float = 0.10,   # lower threshold to get more detections
 ):
     """
     Run YOLOv8 ONNX inference on a PIL image.
     Returns (annotated_image, num_detections).
-    This is a simplified pipeline: resize -> run -> basic filtering.
+
+    NOTE: Ultralytics YOLOv8 ONNX output for detection is:
+      (1, 84, 8400)  ->  84 = 4 box coords + 80 class scores.
+    There is NO separate objectness column here.
     """
 
     orig_w, orig_h = image.size
@@ -226,23 +230,21 @@ def run_yolo_onnx(
 
     input_name = session.get_inputs()[0].name
     outputs = session.run(None, {input_name: img_np})
-    preds = outputs[0]  # Usually (1,84,8400) or (1,8400,84)
+    preds = outputs[0]  # e.g. (1, 84, 8400) or (1, 8400, 84)
 
     # 2) Ensure shape is (num_anchors, num_attrs)
     if preds.ndim == 3:
         # If shape is (1,84,8400) -> transpose to (1,8400,84)
         if preds.shape[1] < preds.shape[2]:
             preds = np.transpose(preds, (0, 2, 1))
-    preds = preds[0]  # (num_anchors, num_attrs)
+    preds = preds[0]  # (num_anchors, num_attrs) = (8400, 84)
 
-    # YOLOv8 format: [x, y, w, h, obj, cls1, cls2, ...]
+    # YOLOv8 format here: [x, y, w, h, cls0, cls1, ... cls79]
     boxes_xywh = preds[:, 0:4]
-    objectness = preds[:, 4]
-    class_scores = preds[:, 5:]
+    class_scores = preds[:, 4:]
 
     class_ids = np.argmax(class_scores, axis=1)
-    class_conf = np.max(class_scores, axis=1)
-    scores = objectness * class_conf
+    scores = np.max(class_scores, axis=1)
 
     # Filter by confidence
     keep = scores > conf_thres
@@ -342,7 +344,7 @@ if uploaded_file is not None:
             session = load_yolov8_onnx()
             if session is not None:
                 with st.spinner("Running YOLOv8 (ONNX) detection..."):
-                    annotated_img, num_det = run_yolov8_onnx = run_yolo_onnx(session, image)
+                    annotated_img, num_det = run_yolo_onnx(session, image)
 
                 if num_det > 0:
                     st.success(f"✅ Objects detected: {num_det}")
